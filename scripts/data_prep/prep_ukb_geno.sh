@@ -74,8 +74,8 @@ $opt/plink2 \
 
 # Filter bgen file to variants passing regenie step1 qc 
 
-bgenix -g ${scratch}/chr${CHR}_hapmap.bgen -incl-rsids ${gwas_dir}/ukb_chr${CHR}_hapmap_${ANC}_step1.prune.in > ${scratch}/chr${CHR}_hapmap_step1.bgen
-bgenix -g ${scratch}/chr${CHR}_hapmap_step1.bgen -index -clobber
+bgenix -g ${scratch}/chr${CHR}_hapmap.bgen -incl-rsids ${gwas_dir}/ukb_chr${CHR}_hapmap_${ANC}_step1.prune.in > ${scratch}/chr${CHR}_hapmap_${ANC}_step1.bgen
+bgenix -g ${scratch}/chr${CHR}_hapmap_${ANC}_step1.bgen -index -clobber
 rm ${scratch}/chr${CHR}_hapmap.bgen*
 
 

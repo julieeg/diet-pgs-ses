@@ -39,7 +39,7 @@ use .regenie-3.2.2
 ## run REGENIE Step 1 
 regenie \
   --step 1 \
-  --bgen ${scratch}/ukb_allchr_hapmap_step1.bgen \
+  --bgen ${scratch}/ukb_allchr_hapmap_${ANC}_step1.bgen \
   --ref-first \
   --sample ${ukb_sample} \
   --keep ${sample_file} \

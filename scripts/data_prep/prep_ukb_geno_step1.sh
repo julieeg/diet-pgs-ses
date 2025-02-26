@@ -28,7 +28,12 @@ source activate $opt/bgen
 
 
 
-## Create single list of variants to include
+############################################
+## Create combined variant list for step1 ## 
+############################################
+
+## Write empty file & print chr* with for loop
+
 > ${gwas_dir}/ukb_allchr_hapmap_${ANC}_step1.prune.in
 
 for i in {1..22} ; do 
@@ -36,10 +41,22 @@ cat ${gwas_dir}/ukb_chr${i}_hapmap_${ANC}_step1.prune.in | awk '!seen[$0]++' >> 
 done
 
 
-## Combine all chr-stratified & QCed bgen files into single bgen file
-cat-bgen -g ${scratch}/chr*_hapmap_step1.bgen -og ${scratch}/ukb_allchr_hapmap_step1.bgen -clobber
-bgenix -g ${scratch}/ukb_allchr_hapmap_step1.bgen -index -clobber
-for i in {1..22} ; do ls ${scratch}/chr${i}_hapmap_step1.bgen* ; done 
+
+## Combine chr-stratified & qc-ed bgen files
+
+cat-bgen -g ${scratch}/chr*_hapmap_${ANC}_step1.bgen -og ${scratch}/ukb_allchr_hapmap_${ANC}_step1.bgen -clobber
+bgenix -g ${scratch}/ukb_allchr_hapmap_${ANC}_step1.bgen -index -clobber
+
+
+
+## Delete breadcrumbs
+
+# chr bgen files
+for i in {1..22} ; do rm ${scratch}/chr${i}_hapmap_${ANC}_step1.bgen* ; done 
+
+# chr snplists
+rm ${gwas_dir}/ukb_chr*_hapmap_${ANC}_step1.snplist
+
 
 
 ##EOF
