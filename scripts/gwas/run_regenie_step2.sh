@@ -8,7 +8,13 @@
 #$ -cwd
 
 
+
 CHR=$SGE_TASK_ID
+
+
+ANC=$1
+
+
 
 
 pheno_file=../data/processed/gwas/ukb_phenos_gwas_macros_MA.txt
@@ -28,6 +34,8 @@ opt=../../opt
 
 source /broad/software/scripts/useuse
 use .regenie-3.2.2
+
+
 
 
 
