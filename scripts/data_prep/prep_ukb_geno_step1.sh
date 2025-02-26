@@ -38,7 +38,7 @@ done
 
 ## Combine all chr-stratified & QCed bgen files into single bgen file
 cat-bgen -g ${scratch}/chr*_hapmap_step1.bgen -og ${scratch}/ukb_allchr_hapmap_step1.bgen -clobber
-bgenix -g ${scratch}/ukb_allchr_hapmap_step1.bgen -index -clobber &&
+bgenix -g ${scratch}/ukb_allchr_hapmap_step1.bgen -index -clobber
 for i in {1..22} ; do ls ${scratch}/chr${i}_hapmap_step1.bgen* ; done 
 
 
