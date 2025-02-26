@@ -27,9 +27,16 @@ reuse -q Anaconda3
 
 
 
-## Compile list of common variants from HapMap3, with imputation INFO>0.8 and maf>0.01 & mac>200 among samples with complete pheno data
 
-# Filter variants based on INFO (mfi) using R
+#########################################################
+## Make list of common, highqual variants from HapMap3 ##
+#########################################################
+
+# -info>0.8, hwe p<1e-15, maf>0.01 & mac>200 among samples with complete data
+
+
+# Filter variants based on info>0.8 (ukb mfi)
+
 use R-4.1
 R --vanilla <<EOF
 library(tidyverse);library(data.table)
@@ -39,7 +46,7 @@ EOF
 
 
 
-# Create filtered bgen file to HapMap3 common variants with INFO>0.8
+# Build bgen file with HapMap3 common variants with info>0.8
 
 source activate $opt/bgen
 bgenix -g ${ukb_bgen_dir}/ukb_imp_chr${CHR}_v3.bgen -incl-rsids ${gwas_dir}/ukb_chr${CHR}_hapmap.snplist > ${scratch}/chr${CHR}_hapmap.bgen
@@ -47,8 +54,8 @@ bgenix -g ${scratch}/chr${CHR}_hapmap.bgen -index -clobber
 
 
 
-# Further restrict snplist to maf>0.01, mac>200, geno>0.1, mind>0.1, hwe p>1e-15 & independent variants (1000kb window; 100 snp step-size, LDr2>0.9)
-# Following guidance from regenie paper for UKB genetic data qc for step1: https://www.nature.com/articles/s41588-021-00870-7#Sec23
+# Filter snplist to maf>0.01, mac>200, geno>0.1, mind>0.1, hwe p>1e-15 & independent variants (1000kb window; 100 snp step-size, LDr2>0.9)
+# Based on regenie paper qc for UKB genetic data for step1: https://www.nature.com/articles/s41588-021-00870-7#Sec23
 
 $opt/plink2 \
 --bgen ${scratch}/chr${CHR}_hapmap.bgen ref-first \
@@ -64,10 +71,13 @@ $opt/plink2 \
 --out ${gwas_dir}/ukb_chr${CHR}_hapmap_${ANC}_step1
 
 
+
 # Filter bgen file to variants passing regenie step1 qc 
+
 bgenix -g ${scratch}/chr${CHR}_hapmap.bgen -incl-rsids ${gwas_dir}/ukb_chr${CHR}_hapmap_${ANC}_step1.prune.in > ${scratch}/chr${CHR}_hapmap_step1.bgen
 bgenix -g ${scratch}/chr${CHR}_hapmap_step1.bgen -index -clobber
 rm ${scratch}/chr${CHR}_hapmap.bgen*
+
 
 
 ##EOF
