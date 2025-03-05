@@ -1,0 +1,24 @@
+#Comparison of regenie_EUR_chr6 with SAIGE_EUR_chr6
+
+library(tidyverse);library(data.table)
+regenie=fread("../data/processed/gwas
+
+y=1 ; Y="Y1"
+sumstats_cols <- c(CHR="CHROM", POS="GENPOS", SNP="ID", EA="ALLELE1", NEA="ALLELE0",
+                   EAF="A1FREQ", N="N", BETA=paste0("BETA.",Y), SE=paste0("SE.",Y),
+                   P_LOG10=paste0("LOG10P.",Y))
+
+regenie <- regenie %>% 
+  mutate(z1=BETA.Y1/SE.Y1) %>%
+  mutate(z2=BETA.Y2/SE.Y2) %>%
+  mutate(z3=BETA.Y3/SE.Y3) 
+
+saige.carb=fread("../../premier/data/raw/Diet.GWAS.Merino.NatHumBehav.2022/GWAS.SumStats.BMI/meta_carb_CHARGE_UKBB_BMI1_noindels.txt.gz") %>% rename(BETA=Effect, SE=StdErr)
+saige.fat=fread("../../premier/data/raw/Diet.GWAS.Merino.NatHumBehav.2022/GWAS.SumStats.BMI/meta_fat_CHARGE_UKBB_BMI1_noindels.txt.gz")
+saige.prot=fread("../../premier/data/raw/Diet.GWAS.Merino.NatHumBehav.2022/GWAS.SumStats.BMI/meta_prot_CHARGE_UKBB_BMI1_noindels.txt.gz")
+
+saige.carb <- saige.carb %>% rename(BETA=Effect, SE=StdErr) %>%
+mutate(
+
+## combine carbohydrate & align effect alleles
+carb_compare <- left_join(
