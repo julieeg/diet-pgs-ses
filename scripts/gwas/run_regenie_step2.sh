@@ -57,9 +57,9 @@ regenie \
   --test additive \
   --bsize 1000 \
   --no-split \
-  --lowmem --lowmem-prefix ../data/temp/ukb_chr${CHR}_macros_MA_step2 \
-  --pred ${gwas_dir}/ukb_gwas_macros_MA_step1_pred.list \
-  --out ../data/processed/gwas/ukb_chr${CHR}_macros_MA_step2 \
+  --lowmem --lowmem-prefix ../data/temp/ukb_chr${CHR}_macros_${ANC}_step2 \
+  --pred ${gwas_dir}/ukb_gwas_macros_${ANC}_step1_pred.list \
+  --out ../data/processed/gwas/ukb_chr${CHR}_macros_${ANC}_step2 \
   --threads 8
 
 
