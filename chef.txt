@@ -1,0 +1,51 @@
+#chef file for regenie GWAS
+
+florezlab_pgs_ses=/humgen/florezlab/users/jgervis/pgs_ses
+
+
+## Prepare phenotypes
+
+qsub ../scripts/data_prep/prep_ukb_phenos.sh 
+
+
+
+## Prepare genotypes
+
+# Prepare bgen files, filtered to common variants then combine into single bgen file for step1 (~500k variants)
+qsub -t 1-22 ../scripts/prep_ukb_geno.sh ${ANC}
+qsub ../scripts/prep_ukb_geno_step1.sh ${ANC}
+
+
+# Prepare bgen files with simple qc (maf>0.001 & imp>0.4) for regenie gwas in step2
+qsub ../scripts/prep_ukb_geno_step2.sh
+
+
+
+## Run regenie
+
+# Run step 1 (~1 day)
+qsub ../scripts/gwas/run_regenie_step1.sh ${ANC}
+
+
+# Run step 2 (~12 hrs)
+qsub -t 1-22 ../scripts/gwas/run_regenie_step2.sh ${ANC}
+
+
+# Run postprocessing for regenie gwas (merge & make qq)
+for y in {1..3} ; do qsub ../scripts/gwas/postprocess_gwas.sh $y ; done
+rsync uger:$florezlab_pgs_ses/data/processed/gwas/qq_plots/* ../data/processed/qq_plots/
+
+
+## Run PRScs
+
+# Use for loop to run for each macronutrient (Y1=carb; Y2=fat; Y3=prot)
+for y in {1..3} ; do qsub -t 1-22 ../scripts/prscs/run_prscs.sh ${y} ; done
+
+
+# Run postprocessing for PRScs
+for y in {1..3} ; do qsub ../scripts/prscs/postprocess_prscs.sh ${y} ; done
+
+
+
+
+
