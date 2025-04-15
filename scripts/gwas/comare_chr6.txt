@@ -1,3 +1,13 @@
+
+
+## Generate histograms for macronutrient phenotypes
+
+
+
+
+
+
+
 #Comparison of regenie_EUR_chr6 with SAIGE_EUR_chr6
 
 library(tidyverse);library(data.table)

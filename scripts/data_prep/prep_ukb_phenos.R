@@ -31,6 +31,11 @@ alch_id=fread("/humgen/florezlab/UKBB_app27892/UKBB_app27892_download_aug_2022/u
                  data.table=FALSE, stringsAsFactors = FALSE) %>%
   select(id=f.eid, alcohol=f.1558.0.0)
 
+# sleep
+sleep_id=fread("/humgen/florezlab/UKBB_app27892/UKBB_app27892_download_jul_2024/ukbb_app27892_sleep_12232024.csv") %>%
+  select(id=eid, sleep=p1160_i0) %>%
+  mutate(sleep=as.numeric(sleep)) %>%
+  mutate_at("sleep", ~ifelse(.<0,NA,.))
 
 # macronutrient intake
 diet=fread("/humgen/florezlab/UKBB_app27892/UKBB_app27892_download_BEFORE_aug_2022/ukb22861.tab.gz", 
@@ -61,21 +66,21 @@ table(main$ac)
 withdraw=scan("/humgen/florezlab/UKBB_app27892/withdraw/w27892_20241217.csv", what=character()) #488
 
 
-## merge phenotype files & remove participants that withdrew consent
+#################################################################
+## Create phenotypes for GWAS based on Merino et al processing ##
+#################################################################
+
+# merge phenotype files & remove participants that withdrew consent
 dat = full_join(main, diet, by = "id") %>%
   left_join(alch_id, by = "id") %>%
+  left_join(sleep_id, by = "id") %>%
   filter(!id %in% withdraw) 
 
 #N=502130
 
-
-
-################################
-## Create phenotypes for GWAS ##
-################################
 cat("Preparing macronutrient & covariate phenotypes....\n")
 
-# winsorize
+# winsorize function
 winsorize <- function(x, SDs=5) {
   bounds <- mean(x, na.rm=T) + SDs * c(-1, 1) * sd(x, na.rm=T)
   x <- ifelse(x<bounds[1], bounds[1], ifelse(x>bounds[2], bounds[2], x))
@@ -83,7 +88,8 @@ winsorize <- function(x, SDs=5) {
 }
 
 
-## Prepare lifestyle phenotypes
+## Prepare lifestyle phenotypes -----------------------------
+
 dat <- dat %>% 
   ## Convert energy (kj -> kcal) & nutrients (g -> kcal) intakes
   mutate(across(starts_with("energy"), ~./4.184)) %>%
@@ -107,7 +113,7 @@ dat <- dat %>%
     #  health == 1 ~ "Poor", health == 2 ~ "Fair", health == 3 ~ "Good", health == 4 ~ "Excellent"))) %>%
   
 
-# Prepare macronutrient phenotypes
+# Prepare macronutrient phenotypes --------------------------
 
 valid_macro_mean <- function(macro, df) {
   # For a given nutrient:
@@ -130,13 +136,18 @@ valid_macro_mean <- function(macro, df) {
     pull(ends_with("pheno"))
 }
 
+# create energy phenotype
+dat <- dat %>% mutate(energy_pheno = valid_macro_mean("energy", .)) 
 
-macros <- c("energy", "carb", "fat", "prot")
+macros <- c("carb", "fat", "prot")
 macro_phenos <- lapply(macros, function(m) {
   dat %>% mutate(
+    #derive mean macronutrient intake variable (kcal)
     macro_pheno=valid_macro_mean(m, .)) %>%
+    #divide by total energy (to % kcal)
+    mutate(macro_pheno=(macro_pheno/energy_pheno)*100) %>%
     rename_with(., ~gsub("macro", m, .)) %>%
-    select(id, ends_with("pheno"))
+    select(id, paste0(m, "_pheno"))
 }) %>% reduce(full_join, by = "id")
 
 
@@ -144,7 +155,7 @@ dat <- dat %>% left_join(macro_phenos, by = "id") %>%
   # Select phenotypes
   select(id, age, ac, sex, bmi, age2, 
          energy_pheno, carb_pheno, fat_pheno, prot_pheno,
-         smoke_former, smoke_current, alcohol, health, townsend)
+         smoke_former, smoke_current, alcohol, health, townsend, sleep)
 
 dim(dat)
 head(dat)
@@ -153,6 +164,7 @@ head(dat)
 ###################################
 ## Run genotying & genetic PC QC ##
 ###################################
+
 cat("Running genotype QC: restricting to european genetic ancestry ....\n")
 
 # function to identify outliers
@@ -162,7 +174,8 @@ find_outliers.fun <- function(x, SDs=6) {
   x
 }
 
-## open UKBB QC file (get PCs and genotyping array info)
+## open UKBB QC file (get PCs and genotyping array info) --------------------
+
 geno_qc <- fread("/humgen/florezlab/UKBB_app27892/UKBB_app27892_download_aug_2022/ukb669177.tab.gz",
             data.table=FALSE, stringsAsFactors=FALSE) %>%
   select(id=f.eid,
@@ -186,10 +199,9 @@ geno_pcs <- fread("/humgen/florezlab/users/pschroeder/UKBB/TOPMedImputation/GWAS
 qc <- full_join(geno_qc, geno_ancestry, by = "id") %>%
   full_join(geno_pcs, by="id")
 
-#Note: 
 
+## Run QC -----------------------
 
-## Run QC
 qc1 <- qc %>% mutate(
   # Exclude participants not passing genetic QC (missing values indicate PASS)
   qc_exclude = ifelse(het_miss_outliers == 1  | sex_chrom_aneuploidy == 1 | 
@@ -213,18 +225,47 @@ geno_id <- qc1 %>%
   select(id, starts_with("PC"), ethnicity, ancestry, geno_array, PC_outliers, eur)
  
 
+##############################
+##  Food preference traits  ##
+##############################
+
+#Food preference traits processing
+#-Food preference traits from the UKB were assessed on a likert scale from 0 (extremely dislike) to 10 (extremely like); 5 was considered “neither like nor dislike”. 
+#-Values of “never tried” and “do not wish to answer” were recoded as missing. 
+#-Variables were then recoded as numeric values, for use in PCA
+
+prefs_id <- fread("/humgen/florezlab/UKBB_app27892/UKBB_app27892_download_jul_2024/ukbb_app27892_diet_preference_11062024.csv") %>%
+  rename(id=eid, survey_date=p20750, survey_duration=p20751) %>%
+  filter(!is.na(survey_date)) %>% # filter out participants without preference data (N=320071)
+  mutate(across(starts_with("p"), ~as.numeric(
+    case_when(
+      . %in% c(1:10) ~ as.character(.),
+      . == "extremely dislike" ~ "1",
+      . == "neither like nor dislike" ~ "5",
+      . == "extremely like" ~ "9",
+      . %in% c("never tried", "do not wish to answer") ~ "NA",
+      TRUE ~ as.character(NA) ) ))) %>%
+  select(id, pref_sweet_food= p20732, 
+         pref_fatty_food=p20659,
+         pref_salty_food=p20716,
+         pref_bitter_food = p20616)
+
 
 #######################################
 ## Create phenotype dataset for GWAS ##
 #######################################
+
 cat("Writing .txt files for analysis .... \n")
 
 processed <- dat %>% filter(id %in% geno_id$id) %>%
   left_join(geno_id, by = "id") %>%
+  left_join(prefs_id, by = "id") %>%
   mutate(FID=id, IID=id, .before=id) %>%
   distinct(IID, .keep_all=T)
 
 head(processed)
+
+# N=5000325
 
 # ==================================
 ## EUR only (for JM replication)
@@ -234,7 +275,8 @@ head(processed)
 eur_processed <- processed %>%
   filter(eur == 1 & is.na(PC_outliers)) %>%
   select(-PC_outliers) %>%
-  mutate(across(c("carb_pheno", "prot_pheno", "fat_pheno"), ~winsorize(.)))
+  mutate(across(c("carb_pheno", "prot_pheno", "fat_pheno", 
+                  "pref_sweet_food", "pref_fatty_food","pref_bitter_food", "pref_salty_food"), ~winsorize(.)))
 
 # all phenos
 eur_processed %>%
@@ -245,21 +287,39 @@ eur_processed <- eur_processed %>% select(-c(ethnicity, ancestry, eur))
 eur_processed %>%
   select(FID, IID, carb_pheno, fat_pheno, prot_pheno) %>%
   filter(complete.cases(.)==T) %>%
-  fwrite("../data/processed/gwas/ukb_phenos_gwas_macros_EUR.txt", sep="\t", na="NA") #196434
+  fwrite("../data/processed/gwas/ukb_phenos_gwas_EUR_macros.txt", sep="\t", na="NA") #196434
+
+# preference phenos
+eur_processed %>%
+  select(FID, IID, pref_sweet_food, pref_fatty_food, pref_bitter_food, pref_salty_food) %>%
+  filter(complete.cases(.)==T) %>%
+  fwrite("../data/processed/gwas/ukb_phenos_gwas_EUR_prefs.txt", sep="\t", na="NA") #196434
 
 # covariate phenos
 eur_processed %>%
-  select(FID, IID, geno_array, ac, age, sex, bmi, paste0("PC", 1:20), smoke_former, smoke_current, alcohol, health, townsend) %>%
+  select(FID, IID, geno_array, ac, age, sex, bmi, paste0("PC", 1:20), smoke_former, smoke_current, alcohol, health, townsend, sleep) %>%
   filter(complete.cases(.) == T) %>%
-  fwrite("../data/processed/gwas/ukb_phenos_gwas_covariates_EUR.txt", sep="\t", na="NA")
+  fwrite("../data/processed/gwas/ukb_phenos_gwas_EUR_covariates.txt", sep="\t", na="NA")
 
-# sample file (with complete data)
+
+## sample file with complete data ----------------- 
+#macros
 eur_processed %>%
   select(FID, IID, carb_pheno, fat_pheno, prot_pheno, geno_array, ac, age, sex, bmi, 
          paste0("PC", 1:20), smoke_former, smoke_current, alcohol, health, townsend) %>%
   filter(complete.cases(.)) %>% select(FID, IID) %>%
   unique(.) %>%
-  fwrite("../data/processed/gwas/ukb_phenos_gwas_macros_EUR_samples.txt", sep="\t")
+  fwrite("../data/processed/gwas/ukb_gwas_EUR_macros_samples.txt", sep="\t")
+
+
+#prefs 
+eur_processed %>%
+  select(FID, IID, pref_sweet_food, pref_fatty_food, pref_bitter_food, pref_salty_food,
+         geno_array, ac, age, sex, bmi, 
+         paste0("PC", 1:20), smoke_former, smoke_current, alcohol, health, townsend, sleep) %>%
+  filter(complete.cases(.)) %>% select(FID, IID) %>%
+  unique(.) %>%
+  fwrite("../data/processed/gwas/ukb_gwas_EUR_prefs_samples.txt", sep="\t")
 
 
 # ========================================
@@ -268,8 +328,9 @@ eur_processed %>%
 
 # Winsorize macronutrients (5 SD)
 ma_processed <- processed %>%
-  select(-PC_outliers, -eur) %>%
-  mutate(across(c("carb_pheno", "prot_pheno", "fat_pheno"), ~winsorize(.)))
+  select(-PC_outliers, -eur, -ethnicity) %>% ## remove ethnicity
+  mutate(across(c("carb_pheno", "prot_pheno", "fat_pheno",
+                  "pref_sweet_food", "pref_fatty_food","pref_bitter_food", "pref_salty_food"), ~winsorize(.)))
 
 # all phenos
 ma_processed %>%
@@ -279,21 +340,36 @@ ma_processed %>%
 ma_processed %>%
   select(FID, IID, carb_pheno, fat_pheno, prot_pheno) %>%
   filter(complete.cases(.)==T) %>%
-  fwrite("../data/processed/gwas/ukb_phenos_gwas_macros_MA.txt", sep="\t", na="NA")
+  fwrite("../data/processed/gwas/ukb_phenos_gwas_MA_macros.txt", sep="\t", na="NA")
+
+# preference phenos
+ma_processed %>%
+  select(FID, IID, pref_sweet_food, pref_fatty_food, pref_bitter_food, pref_salty_food) %>%
+  filter(complete.cases(.)==T) %>%
+  fwrite("../data/processed/gwas/ukb_phenos_gwas_MA_prefs.txt", sep="\t", na="NA")
 
 # covariate phenos
+covars <- c("geno_array", "ac", "age", "sex", "bmi", paste0("PC", 1:20), "smoke_former", "smoke_current", "alcohol", "health", "townsend", "sleep")
 ma_processed %>% 
-  select(FID, IID, geno_array, ac, age, sex, bmi, paste0("PC", 1:20), smoke_former, smoke_current, alcohol, health, townsend) %>%
+  select(FID, IID, geno_array, ac, age, sex, bmi, paste0("PC", 1:20), smoke_former, smoke_current, alcohol, health, townsend, sleep) %>%
   filter(complete.cases(.) == T) %>%
-  fwrite("../data/processed/gwas/ukb_phenos_gwas_covariates_MA.txt", sep="\t", na="NA")
+  fwrite("../data/processed/gwas/ukb_phenos_gwas_MA_covariates.txt", sep="\t", na="NA")
 
 
-# sample file (with complete data)
+# sample file with complete data ---------------
+#macros
 ma_processed %>%
-  filter(complete.cases(.)) %>% select(FID, IID) %>%
+  select(FID, IID, carb_pheno, fat_pheno, prot_pheno, all_of(covars)) %>%
+  filter(complete.cases(.)==T) %>% select(FID, IID) %>%
   unique(.) %>%
-  fwrite("../data/processed/gwas/ukb_phenos_gwas_macros_MA_samples.txt", sep="\t")
+  fwrite("../data/processed/gwas/ukb_gwas_MA_macros_samples.txt", sep="\t")
 
+#prefs
+ma_processed %>%
+  select(FID, IID, pref_sweet_food, pref_fatty_food, pref_bitter_food, pref_salty_food, all_of(covars)) %>%
+  filter(complete.cases(.)==T) %>% select(FID, IID) %>%
+  unique(.) %>%
+  fwrite("../data/processed/gwas/ukb_gwas_MA_prefs_samples.txt", sep="\t")
 
 
 cat("DONE preparing ukb phenotype files for REGENIE GWAS")

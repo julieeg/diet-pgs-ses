@@ -10,20 +10,26 @@ library(topr)
 
 args <- commandArgs(trailingOnly = TRUE)
 y <- args[1]
-sst_file=paste0("../data/processed/gwas/ukb_gwas_Y",y,"_MA_regenie_merged")
+sst_file=paste0("../data/processed/gwas/ukb_gwas_Y",y,"_MA_regenie_merged.gz")
 
 
 sst <- fread(sst_file)
 sst05 <- sst %>% filter(P<0.05)
-y_label <- ifelse(y==1, "Carbohydrate (%)", ifelse(y==2, "Fat (%)", ifelse(y==3, "Protein (%)", NA)))
 
+
+Y=paste0("Y",y)
+y_label <- ifelse(y==1, "Carbohydrate (%)", ifelse(y==2, "Fat (%)", ifelse(y==3, "Protein (%)", NA)))
+y_phenos <- ifelse(y==1, "carb", ifelse(y==2, "fat", ifelse(y==3, "prot", NA)))
+
+
+palette_macros <-c("carb"="#A6501E", "fat"="#1D4884", "prot"= "#356932")
 
 
 
 ## Make simple mht plot with P<0.05 (qqman)
-plot_mht_simple_05 <- function(sst_05) {
+plot_mht_simple_05 <- function(sst_05, ...) {
   qqman::manhattan(sst_05, chr = "CHR", bp = "POS", p = "P", snp = "SNP", 
-                   main = paste("Manhattan Plot:", y_label, "(P <0.05)")) 
+                   main = paste("Manhattan Plot:", y_label, "(P <0.05)"), ...) 
   }
 
 
@@ -46,16 +52,15 @@ plot_mht_genes_05 <- function(sst05) {
 
 #Save plot as pdf
 pdf(paste0("../data/processed/gwas/qq_plots/ukb_gwas_Y",y,"_mht_basic.pdf"), height=6, width=10)
-plot_mht_simple_05(sst05)
+plot_mht_simple_05(sst05, col=c(palette_macros[m], paste0(palette_macros[m], "55")))
 dev.off()
 
 
-#Save plot as pdf
-pdf(paste0("../data/processed/gwas/qq_plots/ukb_gwas_Y",y,"_mht_basic_annotated.pdf"), height=6, width=10)
-plot_mht_genes_05(sst05)
-dev.off()
 
-
+## Save plot as pdf
+#pdf(paste0("../data/processed/gwas/qq_plots/ukb_gwas_Y",y,"_mht_basic_annotated.pdf"), height=6, width=10)
+#plot_mht_genes_05(sst05)
+#dev.off()
 
 #sst5e5_genes <- sst05 %>% filter(P<5e-5) %>% rename(CHROM=CHR) %>% annotate_with_nearest_gene()
 #sst5e5_annotated <- sst5e5_genes %>% filter(Gene_Symbol %in% sst5e5_genes$Gene_Symbol)

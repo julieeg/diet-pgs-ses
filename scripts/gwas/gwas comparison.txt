@@ -1,0 +1,17 @@
+## GWAS comparison
+
+## in interactive R 
+
+CHR=6
+
+R --no-save <<EOF
+# load packages
+library(tidyverse) ; library(data.table)
+# load JM summary stats for chr21
+sumstats_dir="../data/raw/sumstats/"
+for (macro in c("CARB", "FAT", "PROT")) {
+chr=fread(paste0(sumstats_dir, macro, "_allchr_UKBB_results.txt.gz")) %>% 
+filter(CHR==${CHR}) %>% mutate(zscore=BETA/SE) 
+head(chr) ; chr %>% fwrite(paste0(sumstats_dir, macro, "_chr${CHR}_UKBB_results.txt"))
+}
+EOF

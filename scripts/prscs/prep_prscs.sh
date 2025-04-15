@@ -11,6 +11,9 @@
 
 CHR=$SGE_TASK_ID
 
+PHENOS=$1
+ANC=MA
+
 
 
 gwas_dir=../data/processed/gwas
@@ -24,40 +27,43 @@ source /broad/software/scripts/useuse
 use R-4.1
 
 
-
-regenie_file=ukb_chr${CHR}_macros_MA_step2.regenie
-
+regenie_file=${gwas_dir}/ukb_chr${CHR}_${ANC}_${PHENOS}_step2.regenie
 
 
+
+#Note, regenie: ALLELE0=REF/ALLELE1=ALT ; PRScs: A1=GWAS allele/A2=GWAS reference
 
 ## Prepare bim file
 
 echo Preparing bim file ...
 
 R --vanilla << EOF
-library(tidyverse) ; library(data.table)
-fread("${gwas_dir}/${regenie_file}") %>%
+library(data.table) ; library(tidyverse) 
+
+mfi=fread("/broad/ukbb/imputed_v3/ukb_mfi_chr${CHR}_v3.txt") %>% select(ID=V2,REF=V4, ALT=V5)
+Ydict=fread("${regenie_file}.Ydict", header=F) %>% pull(V2) ; Ydict
+
+ss=fread("${regenie_file}") %>% arrange(desc(A1FREQ)) %>%
 mutate(CHR=ifelse(as.numeric(CHROM)<10, paste0("0", CHROM), paste(CHROM))) %>%
-mutate(ALT=ifelse(A1FREQ<0.5, ALLELE1, ALLELE0), REF=ifelse(A1FREQ<0.5, ALLELE0, ALLELE1)) %>%
+distinct(ID, .keep_all=T)
+
+joined=left_join(ss, mfi) %>% arrange(desc(A1FREQ)) %>% distinct(ID, .keep_all=T) %>%
 mutate(POS=0) %>%
-select(CHR, ID, GENPOS, POS, ALT, REF) %>%
-fwrite("${prscs_dir}/ukb_chr${CHR}_MA_regenie.bim", sep="\t", row.names=F, col.names=F)
+select(CHR, ID, GENPOS, POS, REF, ALT) %>%
+fwrite("${prscs_dir}/ukb_chr${CHR}_${ANC}_${PHENOS}.bim", sep="\t", row.names=F, col.names=F)
+
+
+## Prepare summary_stats for EACH phenotype
+
+cat("Preparing summary stats file for PRScs... \n ")
+
+lapply(Ydict, function(y) { 
+fread(paste0("${gwas_dir}/ukb_gwas_${ANC}_",y,"_regenie_merged")) %>%
+select(SNP, A1=EA, A2=NEA, BETA, SE) %>%
+fwrite(paste0("${prscs_dir}/ukb_chr${CHR}_MA_",y,"_regenie.prscsInput.txt"),sep="\t",row.names=F)
+})
+
 EOF
-
-
-
-#Prepare summary_stats for EACH macronutrient (Y1=carb; Y2=fat; Y3=pro)
-
-echo Preparing summary stats file ...
-
-for y in {1..3} ; do
-R --vanilla <<EOF
-library(tidyverse) ; library(data.table)
-fread("${gwas_dir}/${regenie_file}") %>%
-select(SNP=ID, A1=ALLELE1, A2=ALLELE0, BETA=BETA.Y${y}, SE=SE.Y${y}) %>%
-fwrite(paste0("${prscs_dir}/ukb_chr${CHR}_Y${y}_MA_regenie.txt"),sep="\t",row.names=F)
-EOF
-done
 
 
 echo Done preparing files for PRScs!
