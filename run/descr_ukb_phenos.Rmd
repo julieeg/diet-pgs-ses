@@ -1,0 +1,341 @@
+---
+title: "Descriptive analysis for macronutrient PGS x SES analysis"
+output: html_document
+---
+
+```{r, include=FALSE, echo=F, error=F, warning=F, message=F}
+
+knitr::opts_chunk$set(echo=F, error=F, message=F, warning=F, warning=F, fig.align = "center",
+                      out.width = "90%", out.height = "50%", fig.height=5)
+
+## load packages & pantry scripts
+library(tidyverse) 
+library(data.table)
+library(ggpubr)
+library(knitr)
+library(ComplexHeatmap)
+
+lapply(list.files("../../pantry/functions/", full.names = T), source)
+
+# set color palettes
+palette_macros <- c("carb_pheno"=palettes$NatExt$Oranges[2], "fat_pheno"=palettes$NatExt$Blues[2], "prot_pheno"= palettes$NatExt$Greens[2])
+macros.labs <- c(carb="Carbohydrate (%kcal)", fat="Fat (%kcal)", prot="Protein (%kcal)")
+macros_pgs.labs <- c(carb="Carbohydrate PGS", fat="Fat PGS", prot="Protein PGS")
+
+macro_phenos <- c("carb_pheno", "fat_pheno", "prot_pheno")
+names(macro_phenos) <- macros.labs
+
+macro_pgs <- c("carb_pgs", "fat_pgs", "prot_pgs")
+names(macro_pgs) <- macros_pgs.labs
+
+tastes <- c("bitter","sweet","salt","sour","umami", "fatty")
+
+plot_theme <- theme_bw() + theme(
+  axis.text = element_text(size=6), 
+  axis.title = element_text(size=8)
+  ) 
+```
+
+```{r}
+analysis <- readRDS("../data/processed/phenos/ukb_analysis_testing.rda")
+training <- fread("../data/processed/phenos/ukb_analysis_MA_training.csv")
+```
+
+
+### UKB participant characteristics
+
+```{r}
+left_join(
+  fread("../output/tab_descr_basic_allMacros_testing.csv", header=T)  %>% select("V1", "Testing"="Total"),
+  fread("../data/processed/results/tab_descr_basic_training.csv", header=T)
+) %>% fwrite("../data/processed/tab_descr_traintest_v1.csv")
+
+```
+
+```{r}
+fread("../output/tab_descr_basic_allMacros_byDecile_testing.csv", header=T) %>% select(-Total) %>% kable()
+fread("../output/tab_descr_cmrf_allMacros_byDecile_testing.csv", header=T) %>% select(-Total) %>% kable()
+fread("../output/tab_descr_diet_allMacros_byDecile_testing.csv", header=T) %>% select(-Total) %>% kable()
+```
+
+
+### Histograms of macronutrient phenotypes & PGS
+```{r, fig.height=4}
+# macronutrient phenotypes
+plot_macro_hists.l <- lapply(1:3, function(m) {
+  plot_continuous(macro_phenos[[m]], data=analysis, fill=palette_macros[m]) + ggtitle(" ") + ylim(0,7000) +
+    xlab(names(macro_phenos[m])) + plot_theme
+}) ; ggarrange(plotlist = plot_macro_hists.l, nrow=1) #%>% 
+  #ggsave(filename="../output/plot_macro_pheno_histograms_testing.pdf", height=3.5, width=8)
+
+# macronutrient pgs
+plot_pgs_hists.l <- lapply(1:3, function(m) {
+  plot_continuous(macro_pgs[[m]], data=analysis, fill=palette_macros[m]) + ggtitle(names(macro_pgs[m])) + 
+    xlab(names(macro_pgs[m])) + plot_theme + ylim(0,5500) + ggtitle(" ") #theme(axis.text.y = element_text(angle=90, hjust=0.5, vjust=0)) + 
+}) ; ggarrange(plotlist = plot_pgs_hists.l, nrow=1) #%>% 
+  #ggsave(filename="../output/plot_macro_pgs_histograms.pdf", height=3.5, width=8)
+
+```
+
+
+```{r, fig.height=8, fig.width=6, include=F}
+cor_pgs_diet<-fread("../data/processed/results/tab_cormat_pgs_diet_testing.csv")
+
+# HeatMap with 24HR Food Groups
+cor_pgs_24hr <- cor_pgs_diet %>% select(starts_with("fg") & -starts_with("pref") & -ends_with("pgs")) %>% as.matrix()
+cor_pgs_ffq <- cor_pgs_diet %>% select(-starts_with("fg") & -starts_with("pref") & -ends_with("pgs")) %>% as.matrix()
+cor_pgs_prefs <- cor_pgs_diet %>% select(-starts_with("fg") & starts_with("pref") & -ends_with("pgs")) %>% as.matrix()
+
+ComplexHeatmap::Heatmap(t(cor_pgs_24hr), row_names_gp = gpar(fontsize = 5),
+                        column_labels = c("Carb PGS", "Fat PGS", "Protein PGS"),
+                        column_names_gp = gpar(fontsize=8), column_names_rot = T, 
+                        column_names_centered = T) 
+
+ComplexHeatmap::Heatmap(t(cor_pgs_ffq), row_names_gp = gpar(fontsize = 5),
+                        column_labels = c("Carb PGS", "Fat PGS", "Protein PGS"),
+                        column_names_gp = gpar(fontsize=8), column_names_rot = T, 
+                        column_names_centered = T) 
+
+#ComplexHeatmap::Heatmap(t(cor_pgs_prefs), row_names_gp = gpar(fontsize = 5),
+ #                       column_labels = c("Carb PGS", "Fat PGS", "Protein PGS"),
+  #                      column_names_gp = gpar(fontsize=8), column_names_rot = T, 
+   #                     column_names_centered = T) 
+
+```
+
+
+```{r, simple_corr_scatter, echo=F}
+plot_mnacroXpgs10 <- function(macro) {
+  analysis %>% 
+    rename(PGS=paste0(macro,"_pgs_decile")) %>%
+    group_by(PGS=as.factor(PGS)) %>%
+    reframe(Carb_mean=mean(carb_pheno, na.rm=T), Carb_se=sd(carb_pheno, na.rm=T),
+            Fat_mean=mean(fat_pheno, na.rm=T), Fat_se=sd(fat_pheno, na.rm=T),
+            Protein_mean=mean(prot_pheno, na.rm=T), Protein_se=sd(prot_pheno, na.rm=T)) %>%
+    pivot_longer(-"PGS", names_sep="_", names_to=c("Macronutrient", "msr")) %>%
+    pivot_wider(names_from=msr, values_from = value) %>%
+    ggplot(aes(x=PGS, y=mean, color=Macronutrient, ymin=mean-se, ymax=mean+se)) +
+    geom_point(size=2, position=position_dodge(0.35)) + geom_errorbar(width=0.25, position=position_dodge(0.35))+
+    theme_bw() + plot_theme + 
+    xlab(macros_pgs.labs[macro]) + ylab("Macronutrient intake (%kcal), mean (SD) ") + 
+    scale_color_manual(values=c("#A6501E", "#1D4884","#356932"))
+}
+
+ggpubr::ggarrange(plotlist=lapply(names(macros.labs), plot_mnacroXpgs10), nrow=1, common.legend = T, legend = "right") %>%
+  ggsave(filename="../output/plot_compare_macroPGS_macrointake_testing.pdf", height=3, width=7.5)
+```
+
+R2 (variability explained) in macronutrient intake by PGS
+
+```{r}
+demo=paste0("age+sex+",paste0("PC",1:10,collapse = "+"))
+bmi=paste0(demo, "+bmi")
+life=paste0(bmi, "+smoking.lab+alcohol.lab+sleep+health")
+ses=paste0(life, "+educ_level.lab+townsend")
+covarsets.l <- list(Demographic=demo, BMI=bmi, Lifestyle=life, SES=ses)
+
+comp_pheno_pgs <- do.call(rbind.data.frame, lapply(1:3, function(m) {
+  y=macro_phenos[[m]] ; Y=names(macro_phenos)[m] ; x=macro_pgs[[m]] ; X=names(macro_pgs)[m]
+  baseModel <- summary(lm(formula(paste0(y, "~", x )), data=analysis))
+  do.call(rbind.data.frame, lapply(1:length(covarsets.l), function(M) {
+    covModel <- summary(lm(formula(paste0(y, "~", covarsets.l[[M]] )), data=analysis))
+    adjModel <- summary(lm(formula(paste0(y, "~", x, "+", covarsets.l[[M]] )), data=analysis))
+    rbind.data.frame(
+      cbind.data.frame(macro=Y, pgs=X, model=names(covarsets.l)[M], r2=covModel$r.squared),
+      cbind.data.frame(macro=Y, pgs=X, model=paste0(names(covarsets.l)[M], "+PGS"), r2=adjModel$r.squared) )
+  })) %>% rbind.data.frame(cbind.data.frame(macro=Y, pgs=X, model="PGS", r2=baseModel$r.squared))
+}))
+  
+p_comp_r2 <- comp_pheno_pgs %>%
+  mutate(model = factor(model, levels=c("PGS", paste0(rep(names(covarsets.l),each=2),c("","+PGS"))))) %>% 
+  mutate(groups = factor(c(rep(c(rep(names(covarsets.l),each=2),"PGS"),3)), levels=c("PGS", names(covarsets.l)))) %>%
+  mutate(shapes = c(rep(c("A","B"),4),"B", rep(c("C","D"),4),"D", rep(c("E","F"),4),"F")) %>%
+  arrange(model) %>%
+  ggplot(aes(x=groups, group=shapes, y=r2, fill=shapes)) + 
+  facet_wrap(~pgs, scales="free_y") +
+  geom_bar(stat="identity", position=position_dodge2(c(0.35, 0.25)),width=0.75) + 
+  theme_bw() +
+  scale_fill_manual(values=paste0(rep(as.vector(palette_macros),each=2),rep(c("75", ""))),guide=NULL) + 
+  ylab("R2 for macronutrient intake (%kcal)") + xlab("Covariate Adjustments") +
+  theme(axis.text.x = element_text(color="black", size=7),
+        axis.title = element_text(size=8),
+        axis.text.y = element_text(size=7),
+        strip.background = element_blank(),
+        panel.grid = element_blank())  #, angle=45, hjust =1, vjust=1)) + 
+p_comp_r2 %>% ggsave(filename="../output/plot_compare_r2_pgsVpheno_v1_freey_testing.pdf", height=3, width=8)
+
+```
+
+
+
+## Comparison of PGS with FOOD preference traits
+```{r}
+plot_prefXpgs10 <- function(macro) {
+  analysis %>% 
+    rename(PGS=paste0(macro,"_pgs_decile")) %>%
+    group_by(PGS=as.factor(PGS)) %>%
+    reframe(sweet_mean=mean(pref_sweet_food, na.rm=T), sweet_se=sd(pref_sweet_food, na.rm=T),
+           # salty_mean=mean(pref_salty_food, na.rm=T), salty_se=sd(pref_salty_food, na.rm=T)
+            fatty_mean=mean(pref_fatty_food, na.rm=T), fatty_se=sd(pref_fatty_food, na.rm=T)) %>%
+    pivot_longer(-"PGS", names_sep="_", names_to=c("prefer", "msr")) %>%
+    pivot_wider(names_from=msr, values_from = value) %>%
+    mutate(Food=paste0(str_to_sentence(prefer), " Food")) %>%
+    ggplot(aes(x=PGS, y=mean, color=Food, ymin=mean-se, ymax=mean+se)) +
+    geom_point(size=2, position=position_dodge(0.35)) + #geom_errorbar(width=0.25, position=position_dodge(0.35)) + 
+    theme_bw() + plot_theme + ylim(3,7) +
+    xlab(macros_pgs.labs[macro]) + ylab("Mean Food Preference Score (0-9)") + 
+    scale_color_manual(values=c(palettes$NatExt$Purples[3], palettes$NatExt$Reds[3]), name="Preference For")
+}
+
+ggpubr::ggarrange(plotlist=lapply(names(macros.labs), plot_prefXpgs10), nrow=1, common.legend = T, legend = "right") %>%
+  ggsave(filename="../output/plot_compare_macroPGS_foodprefs_testing.pdf", height=2.75, width=7)
+```
+
+
+
+
+```{r, fig.width=15, fig.height=6}
+pgs_prefs <- fread("../data/processed/results/lm_macroPGS_allPrefs_mBase_testing.csv")
+codebook_prefs <- readxl::read_xlsx("../../tasteprefs/data/raw/food_pref_vars.xlsx")
+
+prefs_taste <- codebook_prefs %>% pivot_longer(c(tastes, "nondiet", "spicy")) %>%
+  filter(value == 1)
+
+# P-value correction: 153 (-13 nondiet) traits = 140 foods * 3 PGS = 420
+ 
+pgs_prefs_toPlot <- pgs_prefs %>% mutate(PGS=ifelse(macronutrient_pgs=="carb_pgs", names(macro_pgs)[1],
+                                ifelse(macronutrient_pgs=="fat_pgs", names(macro_pgs[2]), names(macro_pgs[3])))) %>%
+  mutate(dir=ifelse(beta>0,"pos","neg")) %>%
+  rowwise() %>%
+  mutate(cat = ifelse(outcome %in% prefs_taste$varID, prefs_taste$name[which(prefs_taste$varID==outcome)], "misc")) %>%
+  ungroup() %>%
+  mutate(cat=factor(str_to_sentence(cat), levels=c("Sweet", "Fatty", "Umami", "Bitter", "Salt", "Sour", "Spicy", "Misc", "Nondiet"))) %>%
+  mutate(food=str_to_sentence(gsub("Liking for ", "", model)))
+
+p <- pgs_prefs_toPlot %>%
+  ggplot(aes(x=food, y=-log10(p), fill=PGS, color=PGS, shape=dir)) + 
+  facet_grid(~cat, space = "free", scales = "free_x") +
+  theme_bw() + xlab("") +
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1, size=6), strip.background = element_blank()) + 
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = -log10(.05/420), color="red") +
+  geom_point(size=1.25) + scale_shape_manual(values=c(pos=24, neg=25)) +
+  #geom_errorbar() + 
+  scale_fill_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+  scale_color_manual(values=c("#A6501E", "#1D4884","#356932"))
+
+p %>% ggsave(filename="../output/plot_mht_macroPGS_foodprefs_testing.pdf", height=3, width=16)
+
+```
+
+```{r}
+#Focus on beta coefficients
+pB <- pgs_prefs_toPlot %>%
+  ggplot(aes(x=food, y=beta, ymin=beta-se, ymax=beta+se, color=PGS)) + 
+  facet_grid(~cat, space = "free", scales = "free_x") +
+  theme_bw() + xlab("") + ylab("Beta (SE)") +
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1, size=6), strip.background = element_blank()) + 
+  geom_hline(yintercept = 0) +
+  geom_point(size=1.25, position=position_dodge(0.25)) +
+  geom_errorbar(width=0.55,  position=position_dodge(0.25)) + 
+  scale_fill_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+  scale_color_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+  theme(legend.position = "none")
+
+pB %>% ggsave(filename="../output/plot_dotBeta_macroPGS_foodprefs_testing.pdf", height=3.5, width=16)
+
+```
+
+```{r}
+#Zoom in on Nondiet traits
+pz <- ggpubr::ggarrange(
+  pgs_prefs_toPlot %>%
+    filter(cat=="Nondiet") %>%
+    ggplot(aes(x=food, y=-log10(p), fill=PGS, color=PGS, shape=dir)) + 
+    facet_grid(~cat, space = "free", scales = "free_x") +
+    theme_bw() + xlab("") +
+    theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1, size=6), strip.background = element_blank()) + 
+    geom_hline(yintercept = 0) +
+    geom_hline(yintercept = -log10(.05/(13*5)), color="red") +
+    geom_point(size=1.25, position=position_dodge(0.35)) + 
+    scale_shape_manual(values=c(pos=24, neg=25)) +
+    #geom_errorbar() + 
+    scale_fill_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+    scale_color_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+    theme(legend.position = "none"),
+  pgs_prefs_toPlot %>%
+    filter(cat=="Nondiet") %>%
+    ggplot(aes(x=food, y=beta, ymin=beta-se, ymax=beta+se, color=PGS)) + 
+    facet_grid(~cat, space = "free", scales = "free_x") +
+    theme_bw() + xlab("") + ylab("Beta (SE)") +
+    theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1, size=6), strip.background = element_blank()) + 
+    geom_hline(yintercept = 0) +
+    geom_point(size=1.25, position=position_dodge(0.35)) +
+    ylab("Beta (95% CI)") +
+    geom_errorbar(width=0.55,  position=position_dodge(0.35)) + 
+    scale_fill_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+    scale_color_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+    theme(legend.position = "none"),
+  common.legend = T, ncol=2, legend = "none"
+)
+
+#pz %>% ggsave(filename="../output/plot_mht_macroPGS_foodprefs_nondiet_testing.pdf", height=3, width=4)
+
+```
+
+#### Addiing adjustment for macronutrient intake
+
+```{r, fig.width=15, fig.height=6}
+pgs_prefs_adjMacro <- fread("../data/processed/results/lm_macroPGS_allPrefs_mBase_adjMacro_testing.csv")
+
+prefs_taste <- codebook_prefs %>% pivot_longer(c(tastes, "nondiet", "spicy")) %>%
+  filter(value == 1)
+
+pgs_prefs_adj_toPlot <- pgs_prefs_adjMacro %>% mutate(PGS=ifelse(macronutrient_pgs=="carb_pgs", names(macro_pgs)[1],
+                                ifelse(macronutrient_pgs=="fat_pgs", names(macro_pgs[2]), names(macro_pgs[3])))) %>%
+  mutate(dir=ifelse(beta>0,"pos","neg")) %>%
+  rowwise() %>%
+  mutate(cat = ifelse(outcome %in% prefs_taste$varID, prefs_taste$name[which(prefs_taste$varID==outcome)], "misc")) %>%
+  ungroup() %>%
+  mutate(cat=factor(str_to_sentence(cat), levels=c("Sweet", "Fatty", "Umami", "Bitter", "Salt", "Sour", "Spicy", "Misc", "Nondiet"))) %>%
+  mutate(food=str_to_sentence(gsub("Liking for ", "", model)))
+
+# p-values
+p.adj <- pgs_prefs_adj_toPlot %>%
+  ggplot(aes(x=food, y=-log10(p), fill=PGS, color=PGS, shape=dir)) + 
+  facet_grid(~cat, space = "free", scales = "free_x") +
+  theme_bw() + xlab("") +
+  theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1, size=6), strip.background = element_blank()) + 
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = -log10(.05/420), color="red") +
+  geom_point(size=1.25) + scale_shape_manual(values=c(pos=24, neg=25)) +
+  #geom_errorbar() + 
+  scale_fill_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+  scale_color_manual(values=c("#A6501E", "#1D4884","#356932"))
+
+p.adj %>% ggsave(filename="../output/plot_mht_macroPGS_foodprefs_adjMacro_testing.pdf", height=3, width=16)
+
+#betas
+p.adjB <- pgs_prefs_adj_toPlot %>%
+    ggplot(aes(x=food, y=beta, ymin=beta-se, ymax=beta+se, color=PGS)) + 
+    facet_grid(~cat, space = "free", scales = "free_x") +
+    theme_bw() + xlab("") + ylab("Beta (SE)") +
+    theme(axis.text.x = element_text(angle=90, vjust=0.5, hjust=1, size=6), strip.background = element_blank()) + 
+    geom_hline(yintercept = 0) +
+    geom_point(size=1.25, position=position_dodge(0.25)) +
+    geom_errorbar(width=0.55,  position=position_dodge(0.25)) + 
+    scale_fill_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+    scale_color_manual(values=c("#A6501E", "#1D4884","#356932")) + 
+    theme(legend.position = "none")
+
+p.adjB %>% ggsave(filename="../output/plot_dotBeta_macroPGS_foodprefs_adjMacro_testing.pdf", height=3.5, width=16)
+
+
+```
+
+
+
+
+
+
+
