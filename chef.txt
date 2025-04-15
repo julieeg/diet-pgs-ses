@@ -3,48 +3,120 @@
 florezlab_pgs_ses=/humgen/florezlab/users/jgervis/pgs_ses
 
 
-## Prepare phenotypes
+
+## Prepare phenotypes -------------
 
 qsub ../scripts/data_prep/prep_ukb_phenos.sh 
 
 
+# Make training/testing set (70/30)
+R --vanilla <<EOF
+library(data.table) ; library(tidyverse)
 
-## Prepare genotypes
+samples = fread("../data/processed/ukb_phenos_gwas_MA.txt") ; dim(samples) #500325
+N = nrow(samples) ; trainN <- round(0.7*N)
+set.seed(314159) ; train=sample(samples$IID, trainN, replace=F)
+samples %>% filter(IID %in% train) %>% fwrite("../data/processed/ukb_phenos_gwas_MA_training.txt", sep="\t")
 
-# Prepare bgen files, filtered to common variants then combine into single bgen file for step1 (~500k variants)
-qsub -t 1-22 ../scripts/prep_ukb_geno.sh ${ANC}
-qsub ../scripts/prep_ukb_geno_step1.sh ${ANC}
+samples.macros=fread("../data/processed/gwas/ukb_gwas_MA_macros_samples.txt")
+samples.prefs=fread("../data/processed/gwas/ukb_gwas_MA_prefs_samples.txt")
+
+#training samples ------
+samples.macros %>% filter(IID %in% train) %>% fwrite("../data/processed/gwas/ukb_gwas_MA_macros_samples_training.txt", sep="\t")
+samples.prefs %>% filter(IID %in% train) %>% fwrite("../data/processed/gwas/ukb_gwas_MA_prefs_samples_training.txt", sep="\t")
+
+#testing samples -------
+samples.macros %>% filter(!IID %in% train) %>% fwrite("../data/processed/gwas/ukb_gwas_MA_macros_samples_testing.txt", sep="\t")
+samples.prefs %>% filter(!IID %in% train) %>% fwrite("../data/processed/gwas/ukb_gwas_MA_prefs_samples_testing.txt", sep="\t")
+
+EOF
 
 
-# Prepare bgen files with simple qc (maf>0.001 & imp>0.4) for regenie gwas in step2
-qsub ../scripts/prep_ukb_geno_step2.sh
+
+## Prepare genotypes --------------
+
+phenos=prefs
+
+# Prepare bgen files by chr, filtered to common variants (in hapmap) with info >0.8
+qsub -t 1-22 ../scripts/data_prep/prep_ukb_geno.sh ${phenos}
+
+# Create allchr bgen file and filter for mac, maf, geno, mind, and ld (r2<0.1)  
+qsub ../scripts/data_prep/prep_ukb_geno_step1.sh ${phenos}
+
+
+# Prepare bgen files by chr with simple qc (maf>0.001 & imp>0.4) for regenie gwas in step2
+qsub ../scripts/data_prep/prep_ukb_geno_step2.sh ${phenos}
 
 
 
-## Run regenie
+## Run regenie ---------------
 
 # Run step 1 (~1 day)
-qsub ../scripts/gwas/run_regenie_step1.sh ${ANC}
+qsub ../scripts/gwas/run_regenie_step1.sh ${phenos}
 
 
 # Run step 2 (~12 hrs)
-qsub -t 1-22 ../scripts/gwas/run_regenie_step2.sh ${ANC}
+qsub -t 1-22 ../scripts/gwas/run_regenie_step2.sh ${phenos}
 
 
 # Run postprocessing for regenie gwas (merge & make qq)
-for y in {1..3} ; do qsub ../scripts/gwas/postprocess_gwas.sh $y ; done
-rsync uger:$florezlab_pgs_ses/data/processed/gwas/qq_plots/* ../data/processed/qq_plots/
+for y in {1..3} ; do qsub ../scripts/gwas/postprocess_gwas.sh $y ${phenos} ; done
+rsync uger:$florezlab_pgs_ses/data/processed/gwas/plots/* ../data/processed/plots/training/
 
 
-## Run PRScs
+
+## Run PRScs ---------------
+
+# Prepare summary stats files for PRScs (formatting)
+for y in {1..4} ; do qsub -t 1-22 ../scripts/prscs/prep_prscs.sh ${y} ${phenos} ; done
 
 # Use for loop to run for each macronutrient (Y1=carb; Y2=fat; Y3=prot)
-for y in {1..3} ; do qsub -t 1-22 ../scripts/prscs/run_prscs.sh ${y} ; done
+for y in {1..4} ; do qsub -t 1-22 ../scripts/prscs/run_prscs.sh ${y} ${phenos} ; done
 
 
 # Run postprocessing for PRScs
-for y in {1..3} ; do qsub ../scripts/prscs/postprocess_prscs.sh ${y} ; done
+for y in {1..4} ; do qsub ../scripts/prscs/postprocess_prscs.sh ${y} ${phenos} ; done
 
+
+
+## Calculate PGS ---------------
+
+# Calculate PRS using plink
+for y in {1..4} ; do qsub -t 1-22 ../scripts/pgs/run_pgs.sh ${y} ${phenos} ; done
+
+# Run postprocessing for PGS
+for y in {1..4} ; do qsub ../scripts/pgs/postprocess_pgs.sh ${y} ${phenos} ; done
+
+rsync uger:$florezlab_pgs_ses/data/processed/pgs/"ukb_allchr_Y*_MA_pgs" ../data/processed/pgs/
+
+
+## FREEZEes
+MMDD=0327 ; tag=adjBehav ; phenos=prefs/macro ; pheno_pf=prefs/pheno
+freeze=freeze_${phenos}_${tag}_2025${MMDD}
+#gwas
+mkdir $freeze
+cp ukb_phenos_gwas_MA_${phenos}.txt ${freeze}/
+cp ukb_phenos_gwas_MA_covariates.txt ${freeze}/
+cp ukb_gwas_MA_${phenos}_samples_training.txt ${freeze}/
+
+mv ukb_chr*${phenos}_step* ${freeze}/
+mv ukb_gwas_MA_${phenos}_step1_pred.list ${freeze}/ 
+mv ukb_gwas_MA_${phenos}_step1_1.loco ${freeze}/ 
+mv ukb_gwas_MA_${pheno_pf}*merged ${freeze}/ 
+mv ukb_*_MA_${phenos}_step*log ${freeze}/
+mv ukb_chr22_MA_${phenos}_step2.regenie.Ydict ${freeze}/
+
+#prscs
+mkdir $freeze
+mv ukb_*_${pheno_pf}* ${freeze}/
+#pgs
+mkdir $freeze
+ls ukb_*_${pheno_pf}* ${freeze}/
+
+
+## Change Logs
+#2025-04-13: Noticed that there was an incorrect ancestry representation in the GWAS samples. Traced this back to the step in the prep_ukb_pheno.R script, where I restricted to complete.cases for the .SAMPLE file (to use for regenie). Previously, I only remove the 3 macro_pheno traits from this dataset. This was incorrect as it removed an additional ~5k individuals with missing energy_pheno AND most mportantly, removed anyone with missing ETHNICITY (this was defind using Jordi's code to restrict to EUR only...). 
+UPDATES: (1) L331, additionally removed ethnicity (select(-c(ethnicity)) to make sure missing values here did not remove participants unnecessarily; (2) L362-3 & L369-70, revised variable selections for sample files with complete data for REGENIE by changing from vars to remove, to vars to include (with a vector for all covariates)... new pref_sample file N = 173050 w/ ancestry breakdown (Missing, 13533 (7.8%); AFR, 944 (0.5%); AMR, 282 (0.2%); CSA, 1402 (0.8%); EAS, 669 (0.4%); EUR, 155905 (90.1%); MID, 315 (0.2%)) partially from slight sampling bias in preference data (~88% EUR) & last 2 % (to bring to 90%) is from missing PC1-20 data for non-EUR participants.
 
 
 
